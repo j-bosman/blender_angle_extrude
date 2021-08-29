@@ -1,4 +1,7 @@
 import bpy
+import bmesh
+
+from mathutils import Vector
 
 
 class AngleExtrudeOp(bpy.types.Operator):
@@ -11,10 +14,23 @@ class AngleExtrudeOp(bpy.types.Operator):
     distance: bpy.props.FloatProperty('distance', default=0.0)
     angle_x: bpy.props.FloatVectorProperty('angle_x', size=2, default=(0.0, 0.0))
     angle_y: bpy.props.FloatProperty('angle_y', default=0.0)
+    center: bpy.props.FloatVectorProperty('center', size=3, default=(0.0, 0.0), options={'HIDDEN'})
+
+    @staticmethod
+    def _get_selected(items):
+        """
+        Returns selected primitives.
+
+        :param items: items being queried.
+        :type items: Iterable[Union[BMVert, BMEdge, BMFace]]
+        :return: the selected primitives.
+        :rtype: Iterable[Union[BMVert, BMEdge, BMFace]]
+        """
+        return list(filter(lambda item: item.select, items))
 
     @classmethod
     def poll(cls, context):
-        print('polling')
+        # print('polling')
         ob = context.active_object
         _, edge_mode, face_mode = context.scene.tool_settings.mesh_select_mode
         return ob and ob.type == 'MESH' and context.mode == 'EDIT_MESH' and edge_mode ^ face_mode
@@ -22,11 +38,23 @@ class AngleExtrudeOp(bpy.types.Operator):
     def invoke(self, context, event):
         print(__name__, 'invoke')
         context.window_manager.modal_handler_add(self)
+        self._bm = bmesh.from_edit_mesh(context.active_object.data)
+
+        selected_vtx = AngleExtrudeOp._get_selected(self._bm.verts)
+        self.center = sum([v.co for v in selected_vtx], start=Vector([0.0]*3)) / len(selected_vtx)
         return {'RUNNING_MODAL'}
 
     def modal(self, context, event):
         print(__name__, 'modal')
-        return {'FINISHED'}
+
+        if event.type == 'ESC' and event.value == 'RELEASE':
+            return {'FINISHED'}
+
+        if event.type == 'SPACE' and event.value == 'RELEASE':
+            # start a new segment
+            pass
+
+        return {'RUNNING_MODAL'}
 
     def execute(self, context):
         print(__name__, 'exec')
