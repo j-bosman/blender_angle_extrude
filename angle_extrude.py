@@ -11,10 +11,12 @@ class AngleExtrudeOp(bpy.types.Operator):
     bl_space_type = "VIEW_3D"
     bl_options = {'REGISTER', 'UNDO'}
 
-    distance: bpy.props.FloatProperty('distance', default=0.0)
-    angle_x: bpy.props.FloatVectorProperty('angle_x', size=2, default=(0.0, 0.0))
-    angle_y: bpy.props.FloatProperty('angle_y', default=0.0)
-    center: bpy.props.FloatVectorProperty('center', size=3, default=(0.0, 0.0), options={'HIDDEN'})
+    distance: bpy.props.FloatProperty('distance', default=0.0, options={'HIDDEN'})
+    angle_x: bpy.props.FloatProperty('angle_x', default=0.0, options={'HIDDEN'})
+    angle_y: bpy.props.FloatProperty('angle_y', default=0.0, options={'HIDDEN'})
+    center: bpy.props.FloatVectorProperty('center', size=3, default=(.0, .0, .0), options={'HIDDEN'})
+
+    _OP_PROP_NAME = 'angle_extrude_op'
 
     @staticmethod
     def _get_selected(items):
@@ -37,6 +39,13 @@ class AngleExtrudeOp(bpy.types.Operator):
 
     def invoke(self, context, event):
         print(__name__, 'invoke')
+        bpy.types.Scene.angle_extrude_op = bpy.props.PointerProperty(type=bpy.types.Object,
+                                                                     name=AngleExtrudeOp._OP_PROP_NAME)
+        bpy.types.Scene.angle_extrude_op = self
+
+        wm = context.window_manager
+        wm.gizmo_group_type_ensure(ExtrudeManipulator.bl_idname)
+
         context.window_manager.modal_handler_add(self)
         self._bm = bmesh.from_edit_mesh(context.active_object.data)
 
@@ -48,42 +57,63 @@ class AngleExtrudeOp(bpy.types.Operator):
         print(__name__, 'modal')
 
         if event.type == 'ESC' and event.value == 'RELEASE':
+            wm = context.window_manager
+            wm.gizmo_group_type_unlink_delayed(ExtrudeManipulator.bl_idname)
+
+            if hasattr(bpy.types.Scene, AngleExtrudeOp._OP_PROP_NAME):
+                del bpy.types.Scene.angle_extrude_op
             return {'FINISHED'}
 
         if event.type == 'SPACE' and event.value == 'RELEASE':
             # start a new segment
             pass
 
-        return {'RUNNING_MODAL'}
+        return {'PASS_THROUGH'}
 
     def execute(self, context):
-        print(__name__, 'exec')
+        print('AngleExtrudeOp.execute()')
         return {'FINISHED'}
 
 
 class ExtrudeManipulator(bpy.types.GizmoGroup):
 
-    bl_idname =  'angle_extrude.manipulator'
+    bl_idname = 'angle_extrude.manipulator'
     bl_label = 'extrude_manipulator'
     bl_space_type = "VIEW_3D"
-    bl_options = {'3D', 'PERSISTENT'}
+    bl_options = {'3D'}
     bl_region_type = 'WINDOW'
+
+    @staticmethod
+    def get_operator(context):
+        if hasattr(bpy.types.Scene, 'angle_extrude_op'):
+            return context.Scene.angle_extrude_op
+
+        return None
 
     @classmethod
     def poll(cls, context):
-        wm = context.window_manager
-        print(f'Active operator defined: {wm.operators is not None}')
-        if wm.operators:
-            print(f'Active operator name: {wm.operators[-1].bl_idname}')
-        can_poll = len(wm.operators) > 0 and isinstance(wm.operators[-1], AngleExtrudeOp)
-        print(f'gizmo can: {can_poll}')
-        return can_poll
+        op = getattr(bpy.types.Scene, 'angle_extrude_op', None)
+        print(f'gizmo can: {op is not None}')
+        if op is None:
+            wm = context.window_manager
+            wm.gizmo_group_type_ensure(cls.bl_idname)
+            return False
+        return True
 
     def setup(self, context):
         print(__name__, 'setup')
         self._distance_gz = self.gizmos.new('GIZMO_GT_arrow_3d')
-        # self._distance_gz.target_set_operator(AngleExtrudeOp.bl_idname).axis = 'Z'
-        self._distance_gz.use_draw_modal = True
+
+        def get_distance():
+            op = getattr(bpy.types.Scene, 'angle_extrude_op', None)
+            return op.distance
+
+        def set_distance(value):
+            op = getattr(bpy.types.Scene, 'angle_extrude_op', None)
+            op.distance = value
+            op.execute(context)
+
+        self._distance_gz.target_set_handler('offset', get=get_distance, set=set_distance)
         self._x_axis_gz = self.gizmos.new('GIZMO_GT_dial_3d')
         self._y_axis_gz = self.gizmos.new('GIZMO_GT_dial_3d')
 
