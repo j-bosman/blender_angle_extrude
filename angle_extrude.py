@@ -1,8 +1,13 @@
 import bpy
 import bmesh
+import mathutils
 
 from mathutils import Vector
 
+def normal_matrix(normal):
+    z_axis = normal.copy()
+    y_axis = z_axis.cross(mathutils.Vector((0., 0., 1.0)))
+    x_axis = y_axis.cross(z_axis)
 
 class AngleExtrudeOp(bpy.types.Operator):
 
@@ -37,8 +42,32 @@ class AngleExtrudeOp(bpy.types.Operator):
         _, edge_mode, face_mode = context.scene.tool_settings.mesh_select_mode
         return ob and ob.type == 'MESH' and context.mode == 'EDIT_MESH' and edge_mode ^ face_mode
 
+    def _reset_operator(self, selection):
+        self.distance = .0
+        self.angle_x = .0
+        self.angle_y = .0
+
+    @staticmethod
+    def _cleanup(context):
+        wm = context.window_manager
+        wm.gizmo_group_type_unlink_delayed(ExtrudeManipulator.bl_idname)
+
+        if hasattr(bpy.types.Scene, AngleExtrudeOp._OP_PROP_NAME):
+            del bpy.types.Scene.angle_extrude_op
+
+
     def invoke(self, context, event):
         print(__name__, 'invoke')
+
+        self._bm = bmesh.from_edit_mesh(context.active_object.data)
+        selected_vtx = AngleExtrudeOp._get_selected(self._bm.verts)
+
+        if not selected_vtx:
+            return {'CANCELLED'}
+
+        self.center = sum([v.co for v in selected_vtx], start=Vector([0.0]*3)) / len(selected_vtx)
+        normal = mathutils.geometry.normal([vtx.co for vtx in selected_vtx])
+
         bpy.types.Scene.angle_extrude_op = bpy.props.PointerProperty(type=bpy.types.Object,
                                                                      name=AngleExtrudeOp._OP_PROP_NAME)
         bpy.types.Scene.angle_extrude_op = self
@@ -47,21 +76,14 @@ class AngleExtrudeOp(bpy.types.Operator):
         wm.gizmo_group_type_ensure(ExtrudeManipulator.bl_idname)
 
         context.window_manager.modal_handler_add(self)
-        self._bm = bmesh.from_edit_mesh(context.active_object.data)
 
-        selected_vtx = AngleExtrudeOp._get_selected(self._bm.verts)
-        self.center = sum([v.co for v in selected_vtx], start=Vector([0.0]*3)) / len(selected_vtx)
         return {'RUNNING_MODAL'}
 
     def modal(self, context, event):
-        print(__name__, 'modal')
+        print(f'AngleExtrudeOp.modal(): distance={self.distance}')
 
         if event.type == 'ESC' and event.value == 'RELEASE':
-            wm = context.window_manager
-            wm.gizmo_group_type_unlink_delayed(ExtrudeManipulator.bl_idname)
-
-            if hasattr(bpy.types.Scene, AngleExtrudeOp._OP_PROP_NAME):
-                del bpy.types.Scene.angle_extrude_op
+            AngleExtrudeOp._cleanup(context)
             return {'FINISHED'}
 
         if event.type == 'SPACE' and event.value == 'RELEASE':
@@ -74,6 +96,8 @@ class AngleExtrudeOp(bpy.types.Operator):
         print('AngleExtrudeOp.execute()')
         return {'FINISHED'}
 
+    def cancel(self, context):
+        AngleExtrudeOp._cleanup(context)
 
 class ExtrudeManipulator(bpy.types.GizmoGroup):
 
@@ -102,6 +126,7 @@ class ExtrudeManipulator(bpy.types.GizmoGroup):
 
     def setup(self, context):
         print(__name__, 'setup')
+        op = getattr(bpy.types.Scene, 'angle_extrude_op', None)
         self._distance_gz = self.gizmos.new('GIZMO_GT_arrow_3d')
 
         def get_distance():
@@ -111,9 +136,19 @@ class ExtrudeManipulator(bpy.types.GizmoGroup):
         def set_distance(value):
             op = getattr(bpy.types.Scene, 'angle_extrude_op', None)
             op.distance = value
-            op.execute(context)
+            # op.execute(context)
 
         self._distance_gz.target_set_handler('offset', get=get_distance, set=set_distance)
+        self._distance_gz.matrix_basis = mathutils.Matrix.Translation(op.center)
+
+        def get_x_angle():
+            op = getattr(bpy.types.Scene, 'angle_extrude_op', None)
+            return op.angle_x
+
+        def set_x_angle(value):
+            op = getattr(bpy.types.Scene, 'angle_extrude_op', None)
+            op.angle_x = value
+
         self._x_axis_gz = self.gizmos.new('GIZMO_GT_dial_3d')
         self._y_axis_gz = self.gizmos.new('GIZMO_GT_dial_3d')
 
@@ -144,4 +179,3 @@ def unregister():
 
 if __name__ == '__main__':
     register()
-
